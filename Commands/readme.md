@@ -1,0 +1,1 @@
+Not everything in Data Science is with programming languages. We also need to know things like Git, Anaconda and Linux. These are tools that around Data Science, which allow for things like customizing environments and allowing for callaboration.
