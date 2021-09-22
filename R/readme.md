@@ -1,0 +1,1 @@
+Python isn't the only programming language used by Data Scientists. R is a language that is more suited for statistical analysis than Python. If you want to be able to see the numbers that your models are working with, then R is a good tool. In particular, I've found R's linear regression options much more useful than for Python.
