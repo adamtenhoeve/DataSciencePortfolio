@@ -1,0 +1,1 @@
+Pandas is a fast, powerful and flexible Python library for data analysis and manipulation. A strong knowledge of Pandas is useful for the loading, cleaning, transforming and analysis of data for Data Science.
