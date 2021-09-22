@@ -1,0 +1,1 @@
+NumPy is an extremely powerful and fast numeric library in Python that exists as the baseline for many more complex packages. Having a strong understanding of NumPy is necesary for using more complex packages and being able to optimize code.
