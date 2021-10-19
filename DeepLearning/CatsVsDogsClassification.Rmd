@@ -1,0 +1,285 @@
+---
+title: "Classifying Images of Dogs and Cats"
+author: "Adam Ten Hoeve"
+date: "11/19/2020"
+output:
+  word_document: default
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=FALSE, include=FALSE}
+library(keras)
+library(EBImage)
+library(stringr)
+library(tidyverse)
+```
+
+
+## Introduction
+
+Distinguishing between cats and dogs can be very difficult. They both have ears, and noses, and even two eyes! How would we ever be able to distinguish between the two? That is the challenge that I tackled in this project. Can I build a computational model that can distinguish between cats and dogs from just their image?
+
+The reason I chose this project is because I'm interested in computer vision. Computer vision and image classification are becoming more and more applicable in our day-to-day lives. I thought this project would be a good chance for me to get introduced to the methods and Convolutional Neural Networks (CNNs).
+
+## Data Preparation
+
+For this project, I used the Dogs vs. Cats dataset from Kaggle (https://www.kaggle.com/c/dogs-vs-cats). The dataset consists of a training set and a test set. The training set is $25,000$ labeled images of cats and dogs of varying breeds, ages and settings. The test dataset consists of $12,480$ unlabeled images, also of varying breeds, ages and settings. Some examples are displayed below.
+
+
+```{r cars, echo=FALSE}
+par(mfrow=c(1, 4))
+img1 <- readImage("originalData/train/train/cat.4.jpg")
+img2 <- readImage("originalData/train/train/cat.86.jpg")
+img3 <- readImage("originalData/train/train/dog.2840.jpg")
+img4 <- readImage("originalData/train/train/dog.2345.jpg")
+
+display(img1)
+display(img2)
+display(img3)
+display(img4)
+```
+
+So our dataset is a collection of images, how do we get features from that? Well, every image is just a 2D matrix of pixels, and each pixel has $3$ RGB values. With that in mind, we can think of each color value for each pixel being a feature value of that picture. That means a $500$ pixel by $375$ pixel image (which is pretty tiny), where each pixel has $3$ color values, would have $500 \times 375 \times 3 = 562,500$ features for that image alone! For our training set of $15,000$ images, that would be over $8$ billion numbers for our model.
+
+My laptop would never be able to train a model with that many features, so I had to simplify the images. Instead of having 3 color channels per pixel, we can make each greyscale, and only have one value. We can also standardize each image to having fewer pixels in length and width. For this project, I normalized each image to a scale of $50 \times 50$ pixels. This also solved the problem that the pictures had different lengths and widths, which would've been an issue when we tried to train our model. To visualize this, here are the normalized versions of the above images.
+
+```{r, echo=FALSE}
+# A function to turn an image into a greyscale len*len vector
+img_features <- function(img.name, dir_path, len){
+    # Read in the image
+    img <- readImage(file.path(dir_path, img.name))
+    # Resize the image
+    img.resized <- resize(img, w=len, h=len)
+    # Greyscale the image
+    img.grey <- channel(img.resized, "grey")
+    # Extract the image data as a size*size vector
+    img.matrix <- img.grey@.Data
+    img.vector <- as.vector(t(img.matrix))
+    return(img.vector)
+}
+```
+
+```{r, echo=FALSE}
+par(mfrow=c(1, 4), mar=rep(0,4))
+
+img1.norm <- img_features("cat.4.jpg", "originalData/train/train/", 50)
+img2.norm <- img_features("cat.86.jpg", "originalData/train/train/", 50)
+img3.norm <- img_features("dog.2840.jpg", "originalData/train/train/", 50)
+img4.norm <- img_features("dog.2345.jpg", "originalData/train/train/", 50)
+
+img1.matrix <- t(matrix(as.numeric(img1.norm), nrow = 50, ncol = 50, TRUE))
+img2.matrix <- t(matrix(as.numeric(img2.norm), nrow = 50, ncol = 50, TRUE))
+img3.matrix <- t(matrix(as.numeric(img3.norm), nrow = 50, ncol = 50, TRUE))
+img4.matrix <- t(matrix(as.numeric(img4.norm), nrow = 50, ncol = 50, TRUE))
+
+image(t(apply(img1.matrix, 2, rev)), col = gray.colors(12), axes = F)
+image(t(apply(img2.matrix, 2, rev)), col = gray.colors(12), axes = F)
+image(t(apply(img3.matrix, 2, rev)), col = gray.colors(12), axes = F)
+image(t(apply(img4.matrix, 2, rev)), col = gray.colors(12), axes = F)
+```
+We should note that this normalization will negatively impact the accuracy of the model. Because there's fewer features, there's also less detail for the model to use. The purpose of this is entirely because of computation time. If I could train a model in a reasonable time without normalizing the pictures, I would.
+
+```{r, echo=FALSE}
+# Now we need to apply this normalization to all of the images in the train and test sets
+# Turn all images into vectors. Extract label from picture name as well.
+extract_features <- function(dir_path, len){
+    
+    # List all the pictures in the directory
+    img.names <- list.files(dir_path)
+    
+    print(paste("Beginning Extraction on", length(img.names), "images"))
+    # Extract the feature vector for each image. This will take a while.
+    img.features <- lapply(img.names, function(img.name) img_features(img.name, dir_path, len))
+    # Returns a list of lists, change that to a matrix.
+    feature.matrix <- do.call(rbind, img.features)
+    feature.matrix <- data.frame(feature.matrix)
+                              
+    # For each image, extract the label from the image filename
+    catdog.labels <- str_extract(img.names, "^(cat|dog)")
+    # Set class classification cat=0, dog=1
+    label.key <-  c("cat"=0, "dog"=1)
+    pic.labels <- label.key[catdog.labels]
+    # Return both the image matrix, and the labels
+    return(list(X=feature.matrix, y=pic.labels))
+}
+```
+
+
+```{r, echo=FALSE}
+# Let's featurize our ENTIRE dataset now, and save the result.
+# NOTE: THIS FUNCTION WILL TAKE A LONG TIME TO COMPLETE.
+check <- readline("Do you want to extract the features of all the data? y/n: ")
+
+if(check=="y"){
+    train <- extract_features("originalData/train/train/", 50)
+    test <- extract_features("originalData/test1/test1/", 50)
+    save(train, test, file="CatDogFeatures.RData")
+}
+```
+
+```{r, echo=FALSE}
+# Once data has been saved, we can load it instead of re-extracting everything
+# Saves a lot of time
+load("CatDogFeatures.RData")
+```
+
+```{r, echo=FALSE}
+# However, this puts our data into 25000 1D vectors
+# We want the data to be 2D so we need to repermute our vectors.
+
+# Transpose because data is loaded column wise
+train.x = t(train$X)
+# Resize the data to 50*50 matricies
+dim(train.x) = c(50, 50, nrow(train$X), 1)
+# When we changed dimensions, the data was permuted into an incorrect order
+# We can repermute the data back to normal
+train.x = aperm(train.x, c(3,1,2,4))
+
+# Check that it still displays a cat
+# cat.pic <- train.x[2,,,]
+# image(t(apply(cat.pic, 2, rev)), col = gray.colors(12), axes = F)
+
+test.x = t(test$X)
+dim(test.x) = c(50, 50, nrow(test$X), 1)
+test.x = aperm(test.x, c(3, 1, 2, 4))
+```
+
+
+Because each "feature" of the dataset represents a pixel, regular data visualization doesn't make much sense. What would a histogram or scatterplot of pixel values really tell us? One thing that we can do is to check the proportions of the classes within the data to make sure that the data is not skewed.
+
+```{r, echo=FALSE}
+catdog.labels = as.factor(ifelse(as.numeric(train$y), "dog", "cat"))
+barplot(table(catdog.labels), main="Factor Counts of Training Data")
+```
+
+## Modelling the Data
+
+Now that our data is standardized, what model could we use actually do the classification? Most basic classifiers like Logistic Regression or Naive Bayes won't work too well, because of the structured form of the data. But a model that is very well built for the task of image classification are Convolutional Neural Networks (CNNs). 
+
+A CNN is a Deep Learning algorithm, inspired by the connectivity pattern of neurons in the human brain. They're different than normal Neural Networks because a 2D CNN is specifically designed to take into account the spatial dependencies of the data. In other words, the roll of the CNN is to reduce the image into a form that is easier to process without losing the details necessary to accurately classify the data.
+
+So how does it do this? It's pretty complicated, but the gist of it is that there are three types of layers that create a CNN.
+
+1. Convolution Layer: This layer takes the input matrix and applies a “Kernel” to it in a moving window pattern, calculating a “score” for each window. The purpose of this is to extract the high level features, such as edges, from the input image. There can be multiple convolution layers to try to extract different levels of detail from the image.
+2. Pooling Layer: This layer follows the convolution layer, mainly doing dimensionality reduction and noise suppression. It reduces areas of the convolution matrix into single values, usually by finding the maximum or mean value of those areas.
+3. Fully-Connected Layer: After some number of convolution and pooling layers, this layer is basically the beginning of a regular neural network. It flattens the 2D matrix into a 1D vector and feeds that into a regular feed forward Neural Network, which calculates the probability of each class.
+
+Each of these layers is more complex than that basic description, but I don't really have the space to go into it here. For the sake of space, I'm just going to outline some of the choices I made. There are many ways to adjust a CNN, and I attempted to do some hyperparameter tuning, but the model took over an hour to fit each time, so that ended up being limited.
+
+- All activation functions used ReLu. I chose this because it seems the be the standard activation function for most NNs.
+- My Kernels were all of size $3 \times 3$. This was also another practice. We chose an odd sized kernel because it has a distinct "central" pixel with a symmetric amount of pixels surrounding it. An even sized kernel would not have this, which causes distortions.
+- My convolutional layers were always in pairs, the first utilized "same" padding and the second used "valid" padding.
+- My pooling layers always used did max pooling in $2 \times 2$ blocks. This is because max pooling generally performs better than other forms of pooling.
+- I utilized a $20\%$ dropout rate after each pooling layer.
+
+The hyperparamters I did tune were the number of layers and the number of filters for each layer. We can see the results below.
+
+```{r, echo=FALSE, include=FALSE}
+# Build CNN model
+create_model <- function() {
+    model <- keras_model_sequential()
+
+    model %>%
+        layer_conv_2d(kernel_size = c(3, 3), filter = 64,
+                    activation = "relu", padding = "same",
+                    input_shape = c(50, 50, 1),
+                    data_format = "channels_last") %>%
+        layer_conv_2d(kernel_size = c(3, 3), filter = 64,
+                    activation = "relu", padding = "valid") %>%
+        layer_max_pooling_2d(pool_size = 2) %>%
+        layer_dropout(rate = 0.20) %>%
+
+        layer_conv_2d(kernel_size = c(3, 3), filter = 32,
+                    activation = "relu", padding = "same") %>%
+        layer_conv_2d(kernel_size = c(3, 3), filter = 32,
+                    activation = "relu", padding = "valid") %>%
+        layer_max_pooling_2d(pool_size = 2) %>%
+        layer_dropout(rate = 0.20) %>%
+
+        layer_conv_2d(kernel_size = c(3, 3), filter = 32,
+                    activation = "relu", padding = "same") %>%
+        layer_conv_2d(kernel_size = c(3, 3), filter = 32,
+                    activation = "relu", padding = "valid") %>%
+        layer_max_pooling_2d(pool_size = 2) %>%
+        layer_dropout(rate = 0.20) %>%
+
+        layer_flatten() %>%
+        layer_dense(units = 100, activation = "relu") %>%
+        layer_dropout(rate = 0.20) %>%
+        layer_dense(units = 1, activation = "sigmoid")
+
+    compile(model,
+        loss = 'binary_crossentropy',
+        optimizer = "adam",
+        metrics = c('accuracy')
+    )
+    return(model)
+}
+
+nn.model <- create_model()
+summary(nn.model)
+```
+
+```{r, echo=FALSE, include=FALSE}
+Fit the model and observe it's build history
+model.history <- fit(nn.model,
+               x = train.x, y = as.numeric(train$y),
+               epochs = 15, batch_size = 100,
+               validation_split = 0.2
+)
+
+plot(model.history)
+```
+
+```{r, echo=FALSE}
+# Save the model
+nn.model %>% save_model_tf("CNNModel")
+
+# Load the model we want to use
+# nn.model <- load_model_tf("CNNModel")
+```
+
+
+From the above plots, we can see that the model that performed best had 2 layers, with 64 filters on the first layer and 32 on the second filter. Now that we have our finished model, let's see how it does against the test set.
+
+## Testing
+
+As mentioned when we were exploring the data, the test set is unlabeled. This poses a problem with how we can check our accuracy. I decided the easiest way to check the model would be to make the predictions on a random subset of the test set and manually check their correctness. Some of these predictions can be seen below.
+
+```{r, echo=FALSE, include=FALSE}
+# Predict on the test set
+preds <- nn.model %>% predict_classes(test.x)
+preds.probs <- nn.model %>% predict_proba(test.x)
+```
+
+```{r, echo=FALSE, include=FALSE}
+# Visual inspection of 30 cases
+set.seed(1)
+num.rand <- 30
+sample.idxs <- sample(1:nrow(test$X), num.rand, replace=FALSE)
+
+par(mfrow=c(5, 6), mar=rep(0, 4))
+for(i in sample.idxs){
+      image(t(apply(test.x[i,,,], 2, rev)), col = gray.colors(12), axes = F)
+      legend("topright", legend=ifelse(preds[i]==0, "Cat", "Dog"),
+             text.col = ifelse(preds[i]==0, 2, 4), bty = "n", text.font = 2)
+}
+```
+
+After analyzing $90$ pictures, 17 were classified incorrectly. That gives us an approximate model accuracy on the test set of $73/90 \approx 0.811$. That's not bad for a basic model!
+
+However, one of the downsides of any Neural Net is that they are very difficult, if not impossible, to interpret. I don't know why the model misclassified the pictures that it did, or what features of the images it decided were important. Neural nets are a powerful tool for prediction, but not useful for explanation.
+
+## Conclusion
+
+Neural Networks are a very powerful tool for classification, especially with the relatively small amount of data preprocessing needed to train the models. However, CNNs are computationally expensive, require a lot of understanding for hyperparameter tuning and the models are not human understandable. There is certainly still work to be done with this model. 
+
+Some of the problems I had to figure out were how to normalize the image data, how to extract features from that data, and then how to train a model on those features. It took a lot of research and a fair amount of frustration, but I was able to create and train a convolutional neural net with reasonable success rates. If I had more time, I would continue to tune the model's hyperparameters, especially those that I did not during this project. On the Kaggle leaderboards, some people were able to get accuracies of over $98\%$, so I hope to be able to figure out how to increase my overall accuracy by at least a few more percentages.
+
+I now also know, with 80% accuracy, how to tell the difference between cats and dogs. Overall, I would classify this project as a success.
